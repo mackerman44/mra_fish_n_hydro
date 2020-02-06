@@ -1,0 +1,566 @@
+---
+title: 'Estimated Emergence Timing, Peak Presmolt Emigration Timing, and River Discharge for Juvenile Chinook Salmon in the Lemhi River'
+author:
+    - Mike Ackerman^[Biomark, Inc.]
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  html_document:
+    fig_caption: yes
+    fig_height: 8
+    fig_width: 8
+    theme: journal
+    toc: yes
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+---
+
+<style>
+p.caption {
+  font-size: 0.8em;
+  font-style: italic;
+  color: black
+}
+body {
+  text-align: justify
+}
+</style>
+
+```{r setup, echo = F, message = F, warning = F, results = 'hide' }
+library(knitr)
+opts_chunk$set(echo = F, warning = F, message = F, fig.pos = 'ht')
+
+library(captioner)
+tab_nums = captioner(prefix = 'Table')
+fig_nums = captioner()
+
+library(pander)
+# options for table formatting
+panderOptions('big.mark', ',')
+panderOptions('keep.trailing.zeros', FALSE)
+panderOptions('table.split.table', Inf)
+panderOptions('table.style', 'rmarkdown')
+
+#load packages
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library(sf)
+library(sp)
+library(rgeos)
+library(maptools)
+library(scales)
+#devtools::install_github("yutannihilation/ggsflabel")
+library(ggsflabel)
+library(ggmap)
+
+```
+
+## Introduction
+
+The annual hydrograph in the mainstem Lemhi River, Idaho, has been altered due to water diversions and irrigation practices that occur within the valley. This can result in juvenile Chinook *Onchorhynchus tshawytscha* and other salmonids experiencing different flow (e.g. velocity) conditions than occurred under natural or historic regimes, and potentially during critical life stages. Of particular interest, local biologists and managers have suspected that current juvenile Chinook salmon fry emergence and presmolt emigration now coincide with notable increases in discharge prior to or during peak seasonal flows. First, it is hypothesized that fry emergence timing may overlap with increasing disharge due to snowmelt and spring freshets, resulting in a large number of fry being moved downriver upon emergence and potentially out of the system. Second, an artificial ramp in discharge now occurs in the mainstem Lemhi River during the fall when water diversions are turned off and it is hypothesized that the increasing flows result in presmolt Chinook salmon being moved downriver at increased rates.
+
+Here, we look at peak Chinook salmon presmolt emigration timing using data from a rotary screw trap (RST) in the lower Lemhi River and estimate Chinook salmon hatching and emergence timing in the Lemhi River based on spawn timing and modeled temperature data (McNyset et al. 2015). We then look how these critical time periods (hatching, emergence timing, peak presmolt emigration) correspond to the annual Lemhi River hydrograph using USGS stream gauge data from the previous 5 years (2015-2019).
+
+```{r captions}
+hydro_fig = fig_nums('hydro_fig',
+                     "Annual hydrograph for two USGS stream gauges on the mainstem Lemhi River including a site above the confluence with Hayden Creek (USGS 13305000 LEMHI RIVER NR LEMHI ID) and a site in the lower Lemhi River (USGS 13305310 LEMHI RIVER BELOW L5 DIVERSION NEAR SALMON ID). The black line shows daily discharge averaged across years.")
+
+temp_fig = fig_nums('temp_fig',
+                    "Map showing available spatially and temporally continuous temperature data available for the Lemhi River. Shown are the 8-day means for the August, 5 time period")
+
+redd_temp_fig = fig_nums('redd_temp_fig',
+                         "Redd location data for 1999-2015 plotted with available temperature data for the Lemhi River.")
+
+tmp_summ_fig = fig_nums('tmp_summ_fig',
+                        "Temporally continuous modeled temperature averaged across years (2011-2013) and reaches containing redds on the mainstem Lemhi River.")
+
+tu_fig = fig_nums('tu_fig',
+                  "Cumulative temperature units near the mainstem Lemhi River spawning area. The vertical portion of the cumulative TU curve denotes the time of spawning. The horizontal red line denotes the target TUs for Chinook salmon of 517 to time of hatching. The vertical blue line and rectangle denote the estimated period of hatching. The vertical red line and rectangle denote the estimated period of fry emergence.")
+
+rst_fig = fig_nums('rst_fig',
+                   "The cumulative number of fish captured in the lower Lemhi River rotary screw trap during the fall trapping season; the season in which Chinook salmon presmolts are carptured. The green rectangle denotes the estimated peak presmolt emigration season.")
+
+final_fig = fig_nums('final_fig',
+                     "The average annual hydrograph for the mainstem Lemhi River at the 'Above Hayden' location plotted with estimated hatching and fry emergence times and peak presmolt emigration times.")
+
+tu_tab = tab_nums('tu_tab',
+                  'Adapted from Quinn (2005). Number of days from fertilization to hatching and from fertilization to emergence for Chinook salmon at constant temperatures, from Murray and McPhail (1988).')
+```
+
+## Hydrograph
+
+Stream gauge data were downloaded on November 12, 2019 from two USGS stream gauges located on the mainstem Salmon River for the most recent five years (2015-2019). Data were downloaded for the following sites:
+
+* Above Hayden Creek: USGS 13305000 LEMHI RIVER NR LEMHI ID
+* Lower Lemhi River: USGS 13305310 LEMHI RIVER BELOW L5 DIVERSION NEAR SALMON ID
+
+`r fig_nums('hydro_fig', display = 'c')` shows daily discharge (cfs) for each of the locations with the average across years shown in black. Note the drop in flows that occur during summer months resulting from irrigation withdrawals as well as the artifical flow ramp that occurs in the fall when water diversions are turned off.
+
+```{r hydrograph data, results='hide'}
+# daily discharge from USGS 13305310 LEMHI RIVER BELOW L5 DIVERSION NEAR SALMON ID
+l5_discharge = read_delim('data/daily_discharge_13305310.txt', delim = '\t',skip = 30, col_names = F) %>%
+  select(X1:X4) %>%
+  rename(agency = X1,
+         site = X2,
+         date = X3,
+         cfs = X4) %>%
+  filter(date != '2016-02-29') %>%       # remove 2/29 data
+  mutate(year = as.factor(year(date)),
+         yday = yday(date)) %>%
+  mutate(yday = case_when(year == '2016' & yday >= 60 ~ yday - 1, # dealing with 366 days in 2016 data
+                          TRUE ~ yday)) %>%
+  mutate(location = 'Lower Lemhi')
+
+# daily discharge from USGS 13305000 LEMHI RIVER NR LEMHI ID
+abv_hayd_discharge = read_delim('data/daily_discharge_13305000.txt', delim = '\t',skip = 34, col_names = F) %>%
+  select(X1:X4) %>%
+  rename(agency = X1,
+         site = X2,
+         date = X3,
+         cfs = X4) %>%
+  filter(date != '2016-02-29') %>%
+  mutate(year = as.factor(year(date)),
+         yday = yday(date)) %>%
+  mutate(yday = case_when(year == '2016' & yday >= 60 ~ yday - 1, # dealing with 366 days in 2016 data
+                          TRUE ~ yday)) %>%
+  mutate(location = 'Above Hayden')
+
+cfs_df = rbind(l5_discharge, abv_hayd_discharge) %>%
+  select(-agency, -site) %>%
+  select(location, year, date, yday, cfs)
+rm(l5_discharge, abv_hayd_discharge)
+
+cfs_avg = cfs_df %>%
+  select(location, yday, cfs) %>%
+  group_by(location, yday) %>%
+  summarize(cfs = mean(cfs)) %>%
+  ungroup
+```
+
+```{r hydro fig, results='hide', fig.height = 4, fig.cap = hydro_fig}
+cfs_p = ggplot() +
+  geom_line(data = cfs_df, aes(x = yday, y = cfs, color = year)) +
+  geom_line(data = cfs_avg, aes(x = yday, y = cfs)) +
+  theme_bw() +
+  labs(x = 'Day of Year',
+       y = 'Discharge',
+       color = 'Year') +
+  facet_wrap(~ location)
+cfs_p  
+```
+
+## Data Sources
+
+Changes to habitat including stream flow and temperature have potentially altered the time of hatching and fry emergence for juvenile Chinook salmon in the mainstem Lemhi River. Next, I wanted to estimate the timing of hatching and fry emergence for juvenile Chinook salmon in the Lemhi and evaluate where those may fall on the annual hydrograph. To estimate the timing of hatching and fry emergence I considered the following:
+
+1. An assumed peak or median spawning date for Chinook salmon in the Lemhi River. For now, I assumed a median spawn date of September 1, but that could be easily modified if better data or information is available.
+
+2. The relationship between spawning date and hatching and emergence timing. From Quinn (2005): *The relationship between spawning date and emergence stems from the rough equivalence between time and temperature in controlling embryonic development, and a combined unit known as 'degree days' or 'temperature units (TUs)' reflects this fact. The developmental rate of embryos can be estimated from the product of the number of degrees Celcius above 0 times the number of days. For example, coho salmon hatch about 500 TUs after fertilization, and this could be 50 days at 10$^\circ$C or 100 days at 5$^\circ$C.* `r tab_nums('tu_tab', display = 'c')` below, adapted from Table 8-1 in Quinn (2005), shows that Chinook salmon TUs appear to be within the range 404-536 (mean = 500, median = 517) days to hatch.
+
+3. Spatially and temporally continuous modeled temperature data available for the Lemhi River (McNyset et al. 2015). MyNyset et al. (2015) modeled stream temperatures for reaches throughout the Lemhi River Subbasin for 2011-2013 (although 2011 data are not temporally complete). In this case, however, I am only interested in temperature data for reaches within the spawning, embryonic development, and fry emergence portions of the mainstem Lemhi River. And thus, I considered available redd location information for the Lemhi River (described below). Finally, I mined all reaches occurring within spawning areas, averaged across those reaches, and then averaged across years resulting in a single temporally continuous dataset for spawning reaches in the Lemhi River.
+
+4. Redd location information available for the Lemhi River, 1999-2015. Redd locations were joined with the temporally continuous temperature data to determine reaches in the spawning, embryonic development, and fry emergence portions of the mainstem Lemhi River.
+
+`r tab_nums('tu_tab')`
+```{r}
+# temperature unit (TU) information describing hatching and emergence timing for Chinook salmon from Quinn (2005)
+chinook_tu = read_csv('data/chinook_tus_quinn2005.csv') 
+chinook_tu %>%
+  select(-hatch_to_emerge) %>%
+  rename(Temp_C = temp_c,
+         Days_to_Hatch = day_to_hatch,
+         TUs = tus,
+         Days_to_Emerge = day_to_emerge) %>%
+  pander()
+```
+
+## Stream Temperature
+
+First, I want to look at available modeled temperature data for the Lemhi River subbasin. As an example, let's look at data for 2012 (`r fig_nums('temp_fig', display = 'c')`).
+
+```{r temp data, results='hide'}
+# read in temperature data
+lemhi_tmp_2011 = st_read('data/lemhi_temp_shapefiles/Lemhi_2011/Lem_2011_8D_mn.shp') %>%
+  mutate_at(vars(starts_with('Tmn')), list(~na_if(., '-9999')))
+
+lemhi_tmp_2012 = st_read('data/lemhi_temp_shapefiles/Lemhi_2012/Lem_2012_8D_Mn.shp') %>%
+  mutate_at(vars(starts_with('Tmn')), list(~na_if(., '-9999')))
+
+lemhi_tmp_2013 = st_read('data/lemhi_temp_shapefiles/Lemhi_2013/Lem_2013_8D_Mn.shp') %>%
+  mutate_at(vars(starts_with('Tmn')), list(~na_if(., '-9999'))) %>%
+  rename(RCAID = LEM_RCAID)
+```
+
+```{r temp fig, results='hide', fig.height = 4, fig.cap = temp_fig}
+# plot a year of temp data
+lem_2012_p = lemhi_tmp_2012 %>%
+  ggplot() +
+  geom_sf(aes(color = Tmn_12_217)) +
+  scale_colour_gradient(low = 'green', high = 'red') +
+  labs(color = 'Aug 5 Temp C') +
+  theme_bw()
+lem_2012_p
+
+```
+
+Temperature data are available for the entire Lemhi River and all (or nearly all) tributaries. However, I am only interested in temperature data for the mainstem Lemhi River within the Chinook salmon spawning area. So next, I want to plot available redd location data with the temperature data (`r fig_nums('redd_temp_fig', display = 'c')`).
+
+```{r redd data, results='hide'}
+# read in redd data
+redd_df = read_csv(file = 'data/ReddData_With_RID_MEAS.csv', 
+                   # col_types = cols(
+                   #   Year = col_factor(),
+                   #   SubBasin = col_character(),
+                   #   Stream = col_character(),
+                   #   LowBound = col_character(),
+                   #   UpBound = col_character(),
+                   #   Descriptio = col_character(),
+                   #   Datum = col_character(),
+                   #   Section = col_character(),
+                   #   Pass = col_character(),
+                   #   Observers = col_character(),
+                   #   SubSection = col_character(),
+                   #   RKM = col_double()
+                   # )
+                   ) %>%
+  filter(Species == 'Chinook' & Basin == 'Lemhi') %>%
+  select(index, MEAS, Distance, Year, Species, Run, Basin, Stream,
+         Latitude, Longitude, NEAR_DIST, NEAR_X, NEAR_Y) %>%
+  mutate(Year = as.factor(Year)) %>%
+  st_as_sf(coords = c('NEAR_X', 'NEAR_Y'), crs = 4326) %>%               # convert to sf object
+  st_transform(st_crs(lemhi_tmp_2012))                         # set crs to same as lemhi_tmp_2012
+
+```
+
+```{r redd temp fig, results='hide', fig.height = 4, fig.cap = redd_temp_fig}
+# plot 1999-2015 redd data with 2012 temperature data
+redd_tmp_p = ggplot() +
+  geom_sf(data = lemhi_tmp_2012) +
+  geom_sf(data = redd_df, aes(color = Year, fill = Year)) +
+  theme_bw() +
+  theme(axis.text = element_blank()) +
+  labs(color = 'Year') +
+  guides(color = guide_legend(ncol = 2))
+redd_tmp_p
+
+```
+
+Next, I joined the redd and temperature data to filter only for those reaches containing redds and on the mainstem Lemhi River. Within each year, I then averaged across reaches within the spawning area and, finally, averaged across years. In the end, I have temporally continuous modeled temperature averaged across years (2011-2013) and reaches containing redds on the mainstem Lemhi River (`r fig_nums('tmp_summ_fig', display = 'c')`).
+
+```{r snap redds to temp, results='hide'}
+redd_df_sp = as_Spatial(redd_df) 
+
+# Snap redds to 2011 temp data
+redd2tmp_2011 = as_Spatial(lemhi_tmp_2011)
+redd2tmp_2011 = snapPointsToLines(points = redd_df_sp,
+                                  lines = redd2tmp_2011,
+                                  idField = 'RCAID') %>%
+  st_as_sf() %>%
+  rename(RCAID = nearest_line_id)
+
+# Same for 2012
+redd2tmp_2012 = as_Spatial(lemhi_tmp_2012)
+redd2tmp_2012 = snapPointsToLines(points = redd_df_sp,
+                                  lines = redd2tmp_2012,
+                                  idField = 'RCAID') %>%
+  st_as_sf() %>%
+  rename(RCAID = nearest_line_id)
+
+# Same for 2013
+redd2tmp_2013 = as_Spatial(lemhi_tmp_2013)
+redd2tmp_2013 = snapPointsToLines(points = redd_df_sp,
+                                  lines = redd2tmp_2013,
+                                  idField = 'RCAID') %>%
+  st_as_sf() %>%
+  rename(RCAID = nearest_line_id)
+
+# Now, through an iterative exercise, I identified reaches to exclude outside area of interest
+rcaid11_exc = c(63,64,10,82,83,799,18,86,230,2,231,62, 17, 85,239,190,237,236,386,187,238) 
+rcaid12_exc = c(190,236,10,9,62,83,18,85,94,84,2,3,17,187,238) 
+rcaid13_exc = c(231,2,986,840,433,987,799,797,82,10,386,510,83,17,18,86,440,85,94,230)
+
+# filter our temperature data to contain only reach with redd data AND in our mainstem reach of interest
+
+# 2011
+lemhi_tmp_2011 = lemhi_tmp_2011 %>%
+  filter(RCAID %in% unique(redd2tmp_2011$RCAID)) %>%
+  filter(!RCAID %in% rcaid11_exc) %>%
+  select(RCAID, starts_with('Tmn'))
+
+# 2012
+lemhi_tmp_2012 = lemhi_tmp_2012 %>%
+  filter(RCAID %in% unique(redd2tmp_2012$RCAID)) %>%
+  filter(!RCAID %in% rcaid12_exc) %>%
+  select(RCAID, starts_with('Tmn'))
+
+# 2013
+lemhi_tmp_2013 = lemhi_tmp_2013 %>%
+  filter(RCAID %in% unique(redd2tmp_2013$RCAID)) %>%
+  filter(!RCAID %in% rcaid13_exc) %>%
+  select(RCAID, starts_with('X13'))
+
+rm(rcaid11_exc, rcaid12_exc, rcaid13_exc)
+
+# okay, now we have 8-day mean temperatures for reaches containing redds and in area of interest on mainstem
+# Lemhi River. Now, for each year, average temps across reaches.
+
+# helper function to grab n right characters from a character string
+substrRight <- function(x, n){
+  substr(x, nchar(x)-n+1, nchar(x))
+}
+
+# 2011
+tmp_11_sum = lemhi_tmp_2011 %>%
+  as.data.frame() %>%
+  select(-geometry, -RCAID) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column('datespan') %>%
+  # mutate(mn2011 = rowMeans(select(., starts_with('V')), na.rm = T)) %>%
+  mutate(mn2011 = rowMeans(select(., as.character(1:(ncol(.)-1))), na.rm = T)) %>%
+  select(datespan, mn2011) %>%
+  mutate(datespan = substrRight(datespan, 3))
+
+# 2012
+tmp_12_sum = lemhi_tmp_2012 %>%
+  as.data.frame() %>%
+  select(-geometry, -RCAID) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column('datespan') %>%
+  # mutate(mn2012 = rowMeans(select(., starts_with('V')), na.rm = T)) %>%
+  mutate(mn2012 = rowMeans(select(., as.character(1:(ncol(.)-1))), na.rm = T)) %>%
+  select(datespan, mn2012) %>%
+  mutate(datespan = substrRight(datespan, 3))
+
+# 2013
+tmp_13_sum = lemhi_tmp_2013 %>%
+  as.data.frame() %>%
+  select(-geometry, -RCAID) %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column('datespan') %>%
+  # mutate(mn2013 = rowMeans(select(., starts_with('V')), na.rm = T)) %>%
+  mutate(mn2013 = rowMeans(select(., as.character(1:(ncol(.)-1))), na.rm = T)) %>%
+  select(datespan, mn2013) %>%
+  mutate(datespan = substrRight(datespan, 3))
+
+# Merge 3 years of temporally continuous temp data and average across years
+# merge and average across years
+tmp_summ = tmp_11_sum %>%
+  left_join(tmp_12_sum) %>%
+  left_join(tmp_13_sum)
+tmp_summ[1,3] = NA # replace impossible value w/ NA
+select_vars = c('mn2011','mn2012','mn2013')
+tmp_summ = tmp_summ %>%
+  mutate(mn_tmp = rowMeans(select(., select_vars), na.rm = T)) %>%
+  select(datespan, mn_tmp) %>%
+  mutate(datespan = as.numeric(datespan)) %>%
+  rename(yday = datespan)
+
+# finally, let's us fill to create temp data for all 365 days from 8-day means
+yday_tmp = data.frame(yday = 1:365) %>%
+  left_join(tmp_summ) %>%
+  fill(mn_tmp, .direction = 'down')
+
+```
+
+```{r tmp summ fig, results='hide', fig.height = 2.5, fig.cap = tmp_summ_fig}
+# plot our temporally continuous summary of temp data from spawning area
+yday_tmp_p = yday_tmp %>%
+  ggplot() +
+  geom_line(aes(x = yday, y = mn_tmp)) +
+  theme_bw() +
+  labs(x = 'Day of Year',
+       y = 'Temperature (C)')
+yday_tmp_p
+
+```
+
+## Hatching and Emergence Timing
+
+```{r hatch emerge, results='hide'}
+# for beginners, let's assume a median spawn date of 9/1
+spawn_day = yday(as.Date('2019-09-01')) # 244
+target_tus = median(chinook_tu$tus) # 517 TUs
+
+# Calculate cumulative TUs from the date of spawning
+end_yr = yday_tmp[spawn_day:365,]; beg_yr = yday_tmp[1:(spawn_day-1),]
+cumul_tus = rbind(end_yr, beg_yr) %>%
+  mutate(cum_tus = cumsum(mn_tmp),
+         month = month(as.POSIXct(as.Date(yday, origin = '2019-01-01'))))
+
+rm(end_yr, beg_yr)
+
+# estimate days to hatching, and julian and date of hatching day
+hatch_days = min(which(cumul_tus$cum_tu >= target_tus)) # 158
+hatch_jul  = cumul_tus$yday[hatch_days] # 36
+hatch_date = as.Date('2019-01-01'); day(hatch_date) = hatch_jul
+hatch_date = format(hatch_date, format = '%m-%d') # 02-05
+
+# Average monthly temp during the spring (Feb, March, Apr, May) is about 3.3C, which is
+# somewhere between the 2C and 5C lines in chinook_tu. If we split the difference in days from hatch to
+# emergence for those rows in Table 1, we might estimate the number of days hatch to emergence to be about 101.5
+
+# estimate days from hatching to emergence, and julian and date of emergence day
+hatch_to_emerge_days = 101
+emerge_jul = hatch_jul + hatch_to_emerge_days
+emerge_date = as.Date('2019-01-01'); day(emerge_date) = emerge_jul
+emerge_date = format(emerge_date, format = '%m-%d') # 05-17
+
+```
+
+Using the temporally continuous modeled temperatures, and assuming a median spawn time, we can now estimate the timing of hatching and fry emergence for Chinook salmon in the Lemhi River. For starters, let's assume a median or peak spawn date of September 1; we can easily change this assumption if desired. Then, starting at September 1, we can calculate the cumulative TUs and identify the date at which `r target_tus` is achieved, which is when we estimated that hatching would occur (`r fig_nums('tu_fig', display = 'c')`). After estimating the time of hatching, we can then estimate the time of fry emergence. Near the spawning reach, average temperatures during the spring are around 3.3$^\circ$C, which is somewhere between the 2$^\circ$C and 5$^\circ$C rows in `r tab_nums('tu_tab', display = 'c')`. If we split the difference in days from hatch to emergence for those rows in `r tab_nums('tu_tab', display = 'c')`, we might estimate the number of days from hatch to emergence in the Lemhi River to be about `r hatch_to_emerge_days` days. `r fig_nums('tu_fig', display = 'c')` shows the cumulative TUs after spawning along with the estimated timing of hatching and fry emergence.
+
+```{r tu fig, results='hide', fig.height = 2.5, fig.cap = tu_fig, eval = F}
+# plot our temporally continuous summary of temp data from spawning area
+day_span = 21 # the amount of 'shading' to create around estimated hatch and emergence times
+tu_p = cumul_tus %>%
+  ggplot() +
+  geom_line(aes(x = yday, 
+                y = cum_tus), 
+            size = 1.25) +
+  geom_hline(yintercept = target_tus, 
+             color = 'darkorange3') +
+  geom_vline(xintercept = hatch_jul, 
+             color = 'dodgerblue') +
+  annotate('rect', 
+           xmin = hatch_jul - day_span,
+           ymin = -Inf,
+           xmax = hatch_jul + day_span,
+           ymax = +Inf,
+           alpha = 0.2, fill = 'dodgerblue') +
+  geom_vline(xintercept = emerge_jul, 
+             color = 'red') +
+  annotate('rect', 
+           xmin = emerge_jul - day_span,
+           ymin = -Inf,
+           xmax = emerge_jul + day_span,
+           ymax = +Inf,
+           alpha = 0.2, fill = 'red') +
+  theme_bw() +
+  labs(x = 'Day of Year',
+       y = 'Cumulative TUs')
+tu_p
+
+```
+
+```{r tu fig v2, results='hide', fig.height = 2.5, fig.cap = tu_fig}
+# plot our temporally continuous summary of temp data from spawning area
+day_span = 21 # the amount of 'shading' to create around estimated hatch and emergence times
+tu_p2 = cumul_tus %>%
+  as_tibble() %>%
+  mutate(yday = if_else(month >= 9,
+                        ymd('20180101') + days(yday - 1),
+                        ymd('20190101') + days(yday - 1))) %>%
+  ggplot() +
+  geom_line(aes(x = yday, 
+                y = cum_tus), 
+            size = 1.25) +
+  geom_hline(yintercept = target_tus, 
+             color = 'darkorange3') +
+  geom_vline(xintercept = ymd('20190101') + days(hatch_jul - 1), 
+             color = 'dodgerblue') +
+  annotate('rect', 
+           xmin = ymd('20190101') + days(hatch_jul - day_span - 1),
+           ymin = -Inf,
+           xmax = ymd('20190101') + days(hatch_jul + day_span - 1),
+           ymax = +Inf,
+           alpha = 0.2, fill = 'dodgerblue') +
+  geom_vline(xintercept = ymd('20190101') + days(emerge_jul - 1), 
+             color = 'red') +
+  annotate('rect', 
+           xmin = ymd('20190101') + days(emerge_jul - day_span - 1),
+           ymin = -Inf,
+           xmax = ymd('20190101') + days(emerge_jul + day_span - 1),
+           ymax = +Inf,
+           alpha = 0.2, fill = 'red') +
+  theme_bw() +
+  scale_x_date(date_breaks = "2 months",
+               date_labels = "%b") +
+  labs(x = 'Date',
+       y = 'Cumulative TUs')
+tu_p2
+
+```
+
+
+
+## Presmolt Emigration
+
+```{r rst data, results='hide'}
+# finally, I want to look at peak presmolt (and maybe smolt?) emigration times
+# daily data from the L3A0 rotary screw trap 
+rst_data = read_csv('data/Summarized Chinook L3A0 Counts With Covariates.csv') %>%
+  select(SurveyDateTime, SurveyDateTime, BroodYear, NewFish, DailyNEst) %>%
+  mutate(SurveyDateTime = as.POSIXct(SurveyDateTime, format = '%m/%d/%Y'),
+         month = month(SurveyDateTime),
+         yday = yday(SurveyDateTime)) %>%
+  filter(month >= 9) %>%
+  group_by(yday) %>%
+  summarise(mn_NewFish = mean(NewFish, na.rm = T)) %>%
+  ungroup() %>%
+  mutate(cum_NewFish = cumsum(mn_NewFish))
+  
+```
+
+The last piece of information we need is the timing of peak Chinook salmon presmolt emigration in the Lemhi River. `r fig_nums('tu_fig', display = 'c')` shows the cumulative number of newly captured juvenile Chinook salmon in the lower Lemhi River RST averaged across years (2013-2018) during the fall trapping season. Using the cumulative curve, we can visually determine the peak emigration season (shown in green).
+
+```{r rst fig, results='hide', fig.height = 3, fig.cap = rst_fig}
+start_em_jul = 285
+end_em_jul = 326
+rst_p = rst_data %>%
+  ggplot() +
+  geom_line(aes(x = yday, y = cum_NewFish), size = 1.5) +
+  annotate('rect', xmin = start_em_jul, ymin = -Inf, xmax = end_em_jul, ymax = +Inf,
+           alpha = 0.2, fill = 'green') +
+  theme_bw() +
+  labs(x = 'Day of Year',
+       y = 'Cumulative New Fish')
+rst_p
+
+```
+
+## Summary Results
+
+Finally, we can plot all of this information together. `r fig_nums('final_fig', display = 'c')` shows the average annual hydrograph for the mainstem Lemhi River at the 'Above Hayden' location plotted with the estimated hatch (blue) and fry emergence (red) times (with a `r day_span*2` day buffer around each) as well as the peak presmolt emigration season (green). The temperature (gray) is also shown for reference.
+
+```{r final fig, results='hide', fig.height = 4, fig.cap = final_fig}
+# plot hatch timing, emergence timing, and peak emigration timing on the Above Hayden averaged hydrograph
+scalar = 70   # scaling temp data to discharge data for plotting
+final_p = cfs_avg %>%
+  filter(location == 'Above Hayden') %>%
+  ggplot(aes(x = yday)) +
+  geom_line(aes(y = cfs), size = 1.25) +
+  geom_line(aes(y = yday_tmp$mn_tmp*scalar), color = 'gray') +
+  scale_y_continuous(sec.axis = sec_axis(~./scalar, name = expression('Temperature ' ( degree*C)))) +
+  geom_vline(xintercept = hatch_jul, color = 'steelblue') +
+  annotate('rect', xmin = hatch_jul - day_span, ymin = -Inf,
+           xmax = hatch_jul + day_span, ymax = +Inf,
+           alpha = 0.2, fill = 'steelblue') +
+  geom_vline(xintercept = emerge_jul, color = 'red') +
+  annotate('rect', xmin = emerge_jul - day_span, ymin = -Inf,
+           xmax = emerge_jul + day_span, ymax = +Inf,
+           alpha = 0.2, fill = 'red') +
+  annotate('rect', xmin = start_em_jul, ymin = -Inf,
+           xmax = end_em_jul, ymax = +Inf,
+           alpha = 0.2, fill = 'green') +
+  theme_classic() +
+  labs(x = 'Day of Year',
+       y = 'Discharge (cfs)') +
+  theme(axis.text.x = element_text(color = 'black', size = 10),
+        axis.text.y = element_text(color = 'black', size = 10))
+final_p
+
+```
+
+It's worth noting that the peak emigration season depicted is using data from the lower Lemhi RST located near the town of Salmon, ID, but the hydrograph data is from a USGS stream gauge located above the Hayden Creek confluence. These locations are approximately 45 river kilometers apart. Thus, it is likely that their emigration from the upper Lemhi River is earlier (shifting the green rectangle to the left), but to an unkown degree. If desired, we could further examine this using data from the upper Lemhi River RST located just upstream of the Hayden Creek confluence.
+
+### Literature Cited
+
+McNyset, K.M., C.J. Volk, and C.E. Jordan. 2015. Developing an Effective Model for Predicting Spatially and Temporally Continuous Stream Temperatures from Remotely Sensed Land Surface Temperatures. Water. 7:6827-6846.
+
+Murray, C.B., and J.D. McPhail. 1988. Effect of temperature on the development of five species of Pacific salmon (*Oncorhynchus*) embryos and alevins. *Can. J. Zool.* 66:266-273.
+
+Quinn, T.P. 2005. The Behavior and Ecology of Pacific Salmon & Trout. American Fisheries Society, Bethesda, Maryland & University of Washington Press, Seattle and London.
