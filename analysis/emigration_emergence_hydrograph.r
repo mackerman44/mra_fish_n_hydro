@@ -1,7 +1,7 @@
 # Author: Mike Ackerman
 # Purpose: Examine juvenile Chinook salmon emergence and emigration timing as it relates to the hydrograph in the Lemhi River
 # Created: 11/12/2019
-# Last Modified:
+# Last Modified: 02/06/2020
 #
 # Notes on Chinook salmon emergence timing from Quinn (2005): 
 # The relationship between spawning date and emergence stems from the rough equivalence between time and temperature in controlling
@@ -25,12 +25,6 @@ library(maptools)
 library(scales)
 #devtools::install_github("yutannihilation/ggsflabel")
 library(ggsflabel)
-
-#-----------------------------------------------------------------
-# set working directory
-setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
-#setwd('C:/Users/mikea/Dropbox/Projects/BOR/MRA2/analysis/')
-getwd()
 
 #-----------------------------------------------------------------
 # read in discharge data
