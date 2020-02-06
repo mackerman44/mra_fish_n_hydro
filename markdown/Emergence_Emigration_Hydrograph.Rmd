@@ -99,7 +99,7 @@ Stream gauge data were downloaded on November 12, 2019 from two USGS stream gaug
 
 ```{r hydrograph data, results='hide'}
 # daily discharge from USGS 13305310 LEMHI RIVER BELOW L5 DIVERSION NEAR SALMON ID
-l5_discharge = read_delim('data/daily_discharge_13305310.txt', delim = '\t',skip = 30, col_names = F) %>%
+l5_discharge = read_delim('../data/daily_discharge_13305310.txt', delim = '\t',skip = 30, col_names = F) %>%
   select(X1:X4) %>%
   rename(agency = X1,
          site = X2,
@@ -113,7 +113,7 @@ l5_discharge = read_delim('data/daily_discharge_13305310.txt', delim = '\t',skip
   mutate(location = 'Lower Lemhi')
 
 # daily discharge from USGS 13305000 LEMHI RIVER NR LEMHI ID
-abv_hayd_discharge = read_delim('data/daily_discharge_13305000.txt', delim = '\t',skip = 34, col_names = F) %>%
+abv_hayd_discharge = read_delim('../data/daily_discharge_13305000.txt', delim = '\t',skip = 34, col_names = F) %>%
   select(X1:X4) %>%
   rename(agency = X1,
          site = X2,
@@ -165,7 +165,7 @@ Changes to habitat including stream flow and temperature have potentially altere
 `r tab_nums('tu_tab')`
 ```{r}
 # temperature unit (TU) information describing hatching and emergence timing for Chinook salmon from Quinn (2005)
-chinook_tu = read_csv('data/chinook_tus_quinn2005.csv') 
+chinook_tu = read_csv('../data/chinook_tus_quinn2005.csv') 
 chinook_tu %>%
   select(-hatch_to_emerge) %>%
   rename(Temp_C = temp_c,
@@ -181,13 +181,13 @@ First, I want to look at available modeled temperature data for the Lemhi River 
 
 ```{r temp data, results='hide'}
 # read in temperature data
-lemhi_tmp_2011 = st_read('data/lemhi_temp_shapefiles/Lemhi_2011/Lem_2011_8D_mn.shp') %>%
+lemhi_tmp_2011 = st_read('../data/lemhi_temp_shapefiles/Lemhi_2011/Lem_2011_8D_mn.shp') %>%
   mutate_at(vars(starts_with('Tmn')), list(~na_if(., '-9999')))
 
-lemhi_tmp_2012 = st_read('data/lemhi_temp_shapefiles/Lemhi_2012/Lem_2012_8D_Mn.shp') %>%
+lemhi_tmp_2012 = st_read('../data/lemhi_temp_shapefiles/Lemhi_2012/Lem_2012_8D_Mn.shp') %>%
   mutate_at(vars(starts_with('Tmn')), list(~na_if(., '-9999')))
 
-lemhi_tmp_2013 = st_read('data/lemhi_temp_shapefiles/Lemhi_2013/Lem_2013_8D_Mn.shp') %>%
+lemhi_tmp_2013 = st_read('../data/lemhi_temp_shapefiles/Lemhi_2013/Lem_2013_8D_Mn.shp') %>%
   mutate_at(vars(starts_with('Tmn')), list(~na_if(., '-9999'))) %>%
   rename(RCAID = LEM_RCAID)
 ```
@@ -208,7 +208,7 @@ Temperature data are available for the entire Lemhi River and all (or nearly all
 
 ```{r redd data, results='hide'}
 # read in redd data
-redd_df = read_csv(file = 'data/ReddData_With_RID_MEAS.csv', 
+redd_df = read_csv(file = '../data/ReddData_With_RID_MEAS.csv', 
                    # col_types = cols(
                    #   Year = col_factor(),
                    #   SubBasin = col_character(),
@@ -492,7 +492,7 @@ tu_p2
 ```{r rst data, results='hide'}
 # finally, I want to look at peak presmolt (and maybe smolt?) emigration times
 # daily data from the L3A0 rotary screw trap 
-rst_data = read_csv('data/Summarized Chinook L3A0 Counts With Covariates.csv') %>%
+rst_data = read_csv('../data/Summarized Chinook L3A0 Counts With Covariates.csv') %>%
   select(SurveyDateTime, SurveyDateTime, BroodYear, NewFish, DailyNEst) %>%
   mutate(SurveyDateTime = as.POSIXct(SurveyDateTime, format = '%m/%d/%Y'),
          month = month(SurveyDateTime),
